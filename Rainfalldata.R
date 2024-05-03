@@ -25,7 +25,7 @@ setwd('C:/Users/br371/OneDrive - University of Exeter/Masters QGIS/Group coursew
 #---- Add the DTM
 #DTM10 <- raster(Rasterized_DEM.tif)
 # Load raster data
-DEM <- raster("Rasterized_DEM.tif")
+DEM <- raster("Reprojected_Rasterized_DEM.tif")
 DTM_df <- as.data.frame(rasterToPoints(DEM))
 
 # Convert raster to points
@@ -41,7 +41,7 @@ plot(DEM, main = "UK DTM")
 ## read csv ----
 rainfall_stations <- read.csv("RainfallStations.csv") 
 ##convert to sf object
-rainfall_stations_sf <- st_as_sf(rainfall_stations, coords = c('Latitude', 'Longitude'), crs = 4326)
+rainfall_stations_sf <- st_as_sf(rainfall_stations, coords = c('Longitude', 'Latitude'), crs = 4326)
 ##Change CRS 
 
 # 1.3 Embed rainfall data in your environment ----
@@ -104,7 +104,7 @@ y_lim <- c(ext(rainfall_stations_sf)[3]*0.95,ext(rainfall_stations_sf)[4]*1.05)
 # Plot a map with the rain stations and their annual mean
 
 ggplot() +
-  geom_sf(data = uk_sf) +
+ geom_sf(data = uk_sf) +
   geom_point(data = rainfall_stations_sf, aes(x = st_coordinates(rainfall_stations_sf)[, "X"],
                                               y = st_coordinates(rainfall_stations_sf)[, "Y"],
                                               fill = avg_annual,), size = 4, shape = 22,) +
@@ -123,7 +123,7 @@ ggplot() +
                                     by = 500),
                        labels = scales::comma) +
   theme_minimal() +
-  coord_sf(xlim = x_lim, ylim = y_lim) +
+  coord_sf(xlim = c(-10, 3), ylim = y_lim) +
   labs(x = "Longitude", y = "Latitude") +
   ggspatial::annotation_scale(location = "tr", bar_cols = c("black", "white")) +
   ggspatial::annotation_north_arrow(location = "br", which_north = "true",
@@ -134,5 +134,47 @@ ggplot() +
                                     )) +
   theme(legend.position = "right")
 
+# 2 Part B - Interpolate rainfall values over Dartmoor ----
 
-)
+## 2.1 Create a grid where we want to project our interpolation ----
+grid <- raster(extent(243000,285000,55000,100000)) #creates a raster with the extent of rainfall stations
+res(grid) <- 100 #cell size of raster
+proj4string(grid)<-proj4string(DEM) #CRS reprojection
+
+# Convert RasterLayer to SpatialPixelsDataFrame
+grid_spdf <- as(grid, "SpatialPixelsDataFrame")
+
+# Convert SpatialPixelsDataFrame to sf object
+grid_sf <- st_as_sf(grid_spdf)
+
+
+## 2.2 Perform interpolation analysis ----
+
+# Interpolate the grid cells using Kriging
+kriging_result <- autoKrige(avg_annual~1, rainfall_stations_sf, grid_sf)
+
+
+# Interpolate the grid cells using IDW with a power value of 2 (idp=2.0)
+P.idw <- idw(avg_annual~1, rainfall_stations_sf, grid_sf, idp = 2.0)
+
+
+# Extract coordinates and predicted values of Kriging
+coordinates_kriging <- as.data.frame(st_coordinates(kriging_result$krige_output$geometry))
+predictions_kriging <- as.data.frame(kriging_result$krige_output$var1.pred)
+#for Kriging we can also estimate the confidence interval
+confidence_kriging <- as.data.frame(kriging_result$krige_output$var1.stdev*1.96)
+
+# Extract coordinates and predicted values of IDW
+coordinates_idw <- as.data.frame(st_coordinates(P.idw$geometry))
+predictions_idw <- as.data.frame(P.idw$var1.pred)
+
+
+# Combine data into a data frame
+kriging_df <- cbind(coordinates_kriging, predictions_kriging)
+colnames(kriging_df) <- c('x', 'y', 'predicted_rainfall')
+
+kriging_conf_df <- cbind(coordinates_kriging, confidence_kriging)
+colnames(kriging_conf_df) <- c('x', 'y', 'confidence_rainfall')
+
+idw_df <- cbind(coordinates_idw, predictions_idw)
+colnames(idw_df) <- c('x', 'y', 'predicted_rainfall')
