@@ -4,6 +4,7 @@
 library(ggplot2)
 library(maps)
 library(sf)
+library(sp)
 library(raster)
 library(terra)
 library(gridExtra)
@@ -14,13 +15,16 @@ library(gstat)
 library(automap)
 library(rnaturalearth)
 library(ggspatial)
+library(automap)
+library(tmap)
+library(tidyverse)
+library(remotes)
+library(rspatial/terra)
 
 remotes::install_github("ropensci/rnaturalearthhires")
 
 install.packages("rnaturalearthhires", repos = "https://ropensci.r-universe.dev", type = "source")
 library(rnaturalearthhires)
-
-setwd('C:/Users/br371/OneDrive - University of Exeter/Masters QGIS/Group coursework/Rainfall station')
 
 #---- Add the DTM
 #DTM10 <- raster(Rasterized_DEM.tif)
@@ -134,47 +138,62 @@ ggplot() +
                                     )) +
   theme(legend.position = "right")
 
-# 2 Part B - Interpolate rainfall values over Dartmoor ----
 
-## 2.1 Create a grid where we want to project our interpolation ----
-grid <- raster(extent(243000,285000,55000,100000)) #creates a raster with the extent of rainfall stations
-res(grid) <- 100 #cell size of raster
-proj4string(grid)<-proj4string(DEM) #CRS reprojection
-
-# Convert RasterLayer to SpatialPixelsDataFrame
-grid_spdf <- as(grid, "SpatialPixelsDataFrame")
-
-# Convert SpatialPixelsDataFrame to sf object
-grid_sf <- st_as_sf(grid_spdf)
-
-
-## 2.2 Perform interpolation analysis ----
-
-# Interpolate the grid cells using Kriging
-kriging_result <- autoKrige(avg_annual~1, rainfall_stations_sf, grid_sf)
+#Interpolation code
+packages = c('sf', 'sp', 'raster', 'gstat', 
+             'automap','tmap', 'tidyverse')
+for (p in packages){
+  if(!require(p, character.only = T)){
+    install.packages(p)
+  }
+  library(p,character.only = T)
+}
+library(st)
+library(sf)
+library(raster)
 
 
-# Interpolate the grid cells using IDW with a power value of 2 (idp=2.0)
-P.idw <- idw(avg_annual~1, rainfall_stations_sf, grid_sf, idp = 2.0)
+# Read the UK shapefile
+sg <- st_read(dsn = "GBR_adm0.shx",
+              layer = "GBR_adm0", 
+              crs = 4326)
+
+# Read the rainfall data from CSV file
+rainfall <- read.csv("Interpolation.csv")
+
+# Convert rainfall data to sf object
+rainfall_sf <- st_as_sf(rainfall, 
+                        coords = c("Longitude", "Latitude"),
+                        crs = 4326) %>%
+  st_transform(crs = st_crs(sg))  # Transform to match the CRS of sg
+
+sg_sp <- as_Spatial(sg)
+rainfall_sp <- rainfall_sf %>%
+  as_Spatial()
+
+rainfall_sp@bbox <- sg_sp@bbox
+
+grd <- as.data.frame(spsample(rainfall_sp, "regular", n=50000))
+names(grd) <- c("X", "Y")
+coordinates(grd) <- c("X", "Y")
+gridded(grd) <- TRUE # Create SpatialPixel object
+fullgrid(grd) <- TRUE # Create SpatialGrid object
+# Add P's projection information to the empty grid
+proj4string(rainfall_sp) <- proj4string(rainfall_sp) # Temp fix until new proj env is adopted
+proj4string(grd) <- proj4string(rainfall_sp)
+
+plot(grd)
+
+P.idw <- gstat::idw(TMR ~ 1, rainfall_sp, newdata=grd, idp=2.0)
+r <- raster(P.idw)
+r.m <- mask(r, sg_sp)
 
 
-# Extract coordinates and predicted values of Kriging
-coordinates_kriging <- as.data.frame(st_coordinates(kriging_result$krige_output$geometry))
-predictions_kriging <- as.data.frame(kriging_result$krige_output$var1.pred)
-#for Kriging we can also estimate the confidence interval
-confidence_kriging <- as.data.frame(kriging_result$krige_output$var1.stdev*1.96)
-
-# Extract coordinates and predicted values of IDW
-coordinates_idw <- as.data.frame(st_coordinates(P.idw$geometry))
-predictions_idw <- as.data.frame(P.idw$var1.pred)
-
-
-# Combine data into a data frame
-kriging_df <- cbind(coordinates_kriging, predictions_kriging)
-colnames(kriging_df) <- c('x', 'y', 'predicted_rainfall')
-
-kriging_conf_df <- cbind(coordinates_kriging, confidence_kriging)
-colnames(kriging_conf_df) <- c('x', 'y', 'confidence_rainfall')
-
-idw_df <- cbind(coordinates_idw, predictions_idw)
-colnames(idw_df) <- c('x', 'y', 'predicted_rainfall')
+tm_shape(r.m) +
+  tm_raster(n=10,
+            palette = "Blues",
+            midpoint = TRUE,
+            title="Predicted precipitation \n(in mm)") +
+  tm_shape(rainfall_sp) + 
+  tm_dots(size=0.1) +
+  tm_legend(legend.outside=TRUE)
