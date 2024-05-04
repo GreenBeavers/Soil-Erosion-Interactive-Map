@@ -1,6 +1,22 @@
-# 1.0  Part 1 - Load packages ---- 
-## install packages and libraries ----
-### load libraries ----
+
+# Title:      The map server
+# Objective:  The server hosts all the components used to make the app
+# Created by: Pia Benaud
+# Created on: 2024-01-04
+
+
+# Make the basemap --------------------------------------------------------
+
+output$map <- renderLeaflet({
+  leaflet() %>%  
+    setView(lng = -2.141, lat = 54.648, zoom = 6) %>% 
+    addProviderTiles(providers$OpenStreetMap.Mapnik, group = "Colour") %>% # full list of basemaps 'names(providers)' or https://leaflet-extras.github.io/leaflet-providers/preview/index.html
+    addProviderTiles(providers$Esri.WorldImagery,
+                     options = providerTileOptions(opacity = 0.3), group = "Colour") %>% 
+    addProviderTiles(providers$Esri.WorldGrayCanvas, group = "Gray-scale") 
+    
+})
+
 library(ggplot2)
 library(maps)
 library(sf)
@@ -103,7 +119,7 @@ y_lim <- c(ext(rainfall_stations_sf)[3]*0.95,ext(rainfall_stations_sf)[4]*1.05)
 # Plot a map with the rain stations and their annual mean
 
 ggplot() +
- geom_sf(data = uk_sf) +
+  geom_sf(data = uk_sf) +
   geom_point(data = rainfall_stations_sf, aes(x = st_coordinates(rainfall_stations_sf)[, "X"],
                                               y = st_coordinates(rainfall_stations_sf)[, "Y"],
                                               fill = avg_annual,), size = 4, shape = 22,) +
@@ -192,3 +208,109 @@ tm_shape(r.m) +
   tm_shape(rainfall_sp) + 
   tm_dots(size=0.1) +
   tm_legend(legend.outside=TRUE)
+
+#Load the DEM raster
+#dem <- raster("Reprojected_Rasterized_DEM.tif")
+
+
+  # Render the Leaflet map
+  #output$map <- renderLeaflet({
+    #leaflet() %>%
+      #setView(lng = -2.141, lat = 54.648, zoom = 6) %>%
+      #addProviderTiles(providers$OpenStreetMap.Mapnik, group = "Colour") %>%
+      #addProviderTiles(providers$Esri.WorldImagery,
+                       #options = providerTileOptions(opacity = 0.3), group = "Colour") %>%
+      #addProviderTiles(providers$Esri.WorldGrayCanvas, group = "Gray-scale") %>%
+      #addRasterImage(dem, opacity = 0.5)  # Add the DEM raster to the map
+  #})
+ 
+
+# Let's add a popup -------------------------------------------------------
+
+popup_g <- paste0("<b>","Land Cover: ","</b>", LC_Grid_WGS84$Name, "<br>",
+                  "<b>","County: ","</b>", LC_Grid_WGS84$County_Dis, "<br>",
+                  "<b>","Method: ","</b>", LC_Grid_WGS84$Stdy_Meth1, "<br>",
+                  "<b>","Scale: ","</b>", LC_Grid_WGS84$Stdy_Scale, "<br>",
+                  "<b>","Erosion rate: Mean: ","</b>", LC_Grid_WGS84$Rslt_Mean, "<br>",
+                  "<b>","Erosion rate: Median: ","</b>", LC_Grid_WGS84$Rslt_Med, "<br>",
+                  "<b>","Erosion rate: Net: ","</b>", LC_Grid_WGS84$Rslt_Net, "<br>",
+                  "<b>","Erosion volume: ","</b>", LC_Grid_WGS84$Rslt_Vol, "<br>")
+
+
+# Let's filter the data based on the zoom ---------------------------------
+
+# here we are creating a "reactive expression" which subsets the data based on those visible in the UI - zoom in or out and this changes
+
+obsInBounds <- reactive({
+  if (is.null(input$map_bounds))
+    return(LC_Grid_WGS84[FALSE,])
+  
+  bounds <- input$map_bounds
+  ylims <- range(bounds$north, bounds$south)
+  xlims <- range(bounds$east, bounds$west)
+  
+  bbox_coords <- tibble(x = xlims, y = ylims) %>% # make bounds into a tibble
+    st_as_sf(coords = c("x", "y")) %>% # convert to sf points
+    st_set_crs(4326) # set crs to WGS84
+  
+  bbox <- st_bbox(bbox_coords) %>% # make it into a sfc aka polygon
+    st_as_sfc(.)
+  
+  st_filter(LC_Grid_WGS84, bbox) # filter to points within the bbox
+ 
+  
+})
+
+
+# Now let's plot the visible observations ---------------------------------
+
+output$LC_barplot <- renderPlot({
+  if (nrow(obsInBounds()) == 0) # If zero observations are in view, don't plot
+    return(NULL)
+  
+  ggplot(obsInBounds(), aes(Name)) +  
+    geom_bar(colour= "gray20", aes(fill = Name)) + 
+    scale_fill_manual(values = colour_pal) +
+    labs(title = "Visible Land Cover Classes", x = "Land Cover", y = "Frequency") + 
+    theme_classic() + 
+    theme(axis.text.x=element_text(angle=90,hjust=1)) + # rotate the text
+    theme(axis.title = element_text(size = 10.5, colour = "gray20"),
+          plot.title = element_text(colour = "gray20", size = 12, face = "bold")) +
+    theme(legend.position = "none")
+  
+})
+
+# Now let's define the colour palettes and bring it all together ----------
+colour_group <- LC_Grid_WGS84$Class
+pal1 <- colorFactor(palette = colour_pal, domain = colour_group)
+
+observe({
+  
+  colour_by <- input$point_colour # for the input (on ui) 'point_colour'
+
+  if (colour_by == "Class") {
+    colour_group <- LC_Grid_WGS84$Class
+    pal1 <- colorFactor(palette = colour_pal, domain = colour_group)
+  }
+})
+ 
+  
+  
+  
+  leafletProxy("map") %>%  # Then adding it all to the map
+    clearShapes() %>%
+    addCircleMarkers(data = LC_Grid_WGS84, group = "Locations", radius = 8, fillOpacity = 0.8, weight = 0.8, fillColor = ~pal1(LC_Grid_WGS84$Class), popup = popup_g) %>%
+    addLayersControl(
+      options = layersControlOptions(collapsed = FALSE),
+      overlayGroups = c("Locations"),
+      baseGroups = c("Colour", "Gray-scale"),
+      position = "topleft") 
+  
+ 
+    
+      
+
+
+
+
+
