@@ -15,7 +15,7 @@ library(sf) # for dealing with vectors
 
  # one option is to turn the point data into polygons - this is useful for extracting some information. Though it can make it challenging to visualise on the map due to scale.
 
-Soil_Erosion <- read_csv("C:/Users/bs498/OneDrive - University of Exeter/GIS Group Work/Project_C/Data/Soil_Erosion_Data.csv") %>% # read in the csv
+Soil_Erosion <- read_csv("Data/Soil_Erosion_Data.csv") %>% # read in the csv
   st_as_sf(., coords = c("Easting", "Northing"), crs = 27700) %>%  # convert to sf object. note BNG
   st_buffer(., dist = 250) %>%   # put a 250 m buffer around each point
   st_jitter(., 100)  %>% # there is some overlap between points, to make sure they are all visible, we can slightly alter their coordinates i.e. randomly within 100m
