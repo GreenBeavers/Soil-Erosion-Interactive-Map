@@ -1,1 +1,1 @@
-All files necessary to create the Shiny Map can be found in Project_C folder. Any backup data including the old R code as well as examples made by Pia Benaud can be found in the backup folder.
+All files necessary to create the Shiny Interactive Map can be found in Project_C folder. All its outputs are necessary data can be found in the subfolder titled 'Data. Any backup data including the old R code as well as examples made by Pia Benaud can be found in the backup folder.
